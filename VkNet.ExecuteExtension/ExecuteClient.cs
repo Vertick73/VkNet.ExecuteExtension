@@ -17,6 +17,9 @@ namespace VkNet.ExecuteExtension
 {
     public class ExecuteClient : IAsyncDisposable
     {
+#if DEBUG
+        private static NLog.Logger logger = NLog.LogManager.GetCurrentClassLogger();
+#endif
         private static readonly JsonSerializerSettings serializerSettings = new()
         {
             NullValueHandling = NullValueHandling.Ignore,
@@ -27,8 +30,8 @@ namespace VkNet.ExecuteExtension
         private readonly Task _executeHandlerTask;
         private readonly ConcurrentQueue<MethodData> _methodsToExecute = new();
         private readonly IVkApi _vkApi;
-        private DateTime? firstAddTime = DateTime.Now;
-        private DateTime? lastAddTime = DateTime.Now;
+        private DateTime firstAddTime = DateTime.Now;
+        private DateTime lastAddTime = DateTime.Now;
 
         public ExecuteClient(string token, CancellationTokenSource cts)
         {
@@ -42,15 +45,9 @@ namespace VkNet.ExecuteExtension
         }
 
         public TimeSpan CheckDelay { get; set; } = TimeSpan.FromMilliseconds(100);
-        public int maxExecuteCount { get; set; } = 25;
+        public int MaxExecuteCount { get; set; } = 25;
         public TimeSpan MaxWaitingTime { get; set; } = TimeSpan.FromMilliseconds(5000);
         public TimeSpan PendingTime { get; set; } = TimeSpan.FromMilliseconds(1000);
-
-        public async ValueTask DisposeAsync()
-        {
-            _cts.Cancel();
-            await _executeHandlerTask.ConfigureAwait(false);
-        }
 
         private async Task ExecuteCycleTask(CancellationToken cancellationToken)
         {
@@ -59,37 +56,40 @@ namespace VkNet.ExecuteExtension
                 while (true)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (_methodsToExecute.Count >= maxExecuteCount || !_methodsToExecute.IsEmpty && IsTimeout())
+                    if (_methodsToExecute.Count >= MaxExecuteCount || !_methodsToExecute.IsEmpty && IsTimeout())
                     {
                         var methodsDataChunck = new List<MethodData>();
-                        MethodData req;
 
-                        for (var i = 0; i < maxExecuteCount; i++)
-                            if (_methodsToExecute.TryDequeue(out req))
+                        for (var i = 0; i < MaxExecuteCount; i++)
+                            if (_methodsToExecute.TryDequeue(out var req))
                                 methodsDataChunck.Add(req);
-                        ExecuteRun(methodsDataChunck, cancellationToken);
+                            else if(_methodsToExecute.IsEmpty)
+                                break;
+                        _ = ExecuteRun(methodsDataChunck, cancellationToken);
                     }
                     else
                     {
-                        await Task.Delay(CheckDelay);
+                        await Task.Delay(CheckDelay, cancellationToken);
                     }
                 }
             }
             catch (OperationCanceledException)
             {
-                foreach (var methodData in _methodsToExecute) methodData.Task.SetCanceled();
+                foreach (var methodData in _methodsToExecute) methodData.Task.SetCanceled(cancellationToken);
             }
         }
 
         private bool IsTimeout()
         {
-            return DateAndTime.Now - lastAddTime > PendingTime || DateAndTime.Now - firstAddTime > MaxWaitingTime
-                ? true
-                : false;
+            return DateAndTime.Now - lastAddTime > PendingTime || DateAndTime.Now - firstAddTime > MaxWaitingTime;
         }
 
-        private async void ExecuteRun(List<MethodData> methods, CancellationToken cancellationToken)
+        private async Task ExecuteRun(List<MethodData> methods, CancellationToken cancellationToken)
         {
+#if DEBUG
+            logger.Debug("ExecuteRun count: {0}", methods.Count);
+#endif
+            if (methods.Count == 0) return;
             var executeCode = new StringBuilder("var out = [];");
             for (var i = 0; i < methods.Count; i++)
             {
@@ -109,6 +109,9 @@ namespace VkNet.ExecuteExtension
             }
             catch (TooManyRequestsException)
             {
+#if DEBUG
+                logger.Debug("TooManyRequestsException, methods count: {0}", methods.Count);
+#endif
                 foreach (var methodData in methods) _methodsToExecute.Enqueue(methodData);
             }
             catch (ExecuteException e)
@@ -124,8 +127,13 @@ namespace VkNet.ExecuteExtension
             }
             catch (OperationCanceledException)
             {
-                foreach (var methodData in methods) methodData.Task.SetCanceled();
+                foreach (var methodData in methods) methodData.Task.SetCanceled(cancellationToken);
             }
+            catch (ErrorExecutingCodeException e)
+            {
+                throw e;
+            }
+
         }
 
         public Task<VkResponse> AddToExecuteAsync(string methodName, VkParameters parameters)
@@ -145,9 +153,26 @@ namespace VkNet.ExecuteExtension
             return tcs.Task;
         }
 
+        public async Task Flush()
+        {
+            var methodsDataChunck = new List<MethodData>();
+
+            for (var i = 0; i < MaxExecuteCount; i++)
+                if (_methodsToExecute.TryDequeue(out var req))
+                    methodsDataChunck.Add(req);
+                else if (_methodsToExecute.IsEmpty)
+                    break;
+            await ExecuteRun(methodsDataChunck, _cts.Token).ConfigureAwait(false);
+        }
+
         public void Dispose()
         {
             DisposeAsync().AsTask().Wait();
+        }
+        public async ValueTask DisposeAsync()
+        {
+            _cts.Cancel();
+            await _executeHandlerTask.ConfigureAwait(false);
         }
     }
 }
