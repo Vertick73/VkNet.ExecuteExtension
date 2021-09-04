@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.VisualBasic;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using NLog;
 using VkNet.Abstractions;
 using VkNet.Exception;
 using VkNet.Model;
@@ -18,7 +19,7 @@ namespace VkNet.ExecuteExtension
     public class ExecuteClient : IAsyncDisposable
     {
 #if DEBUG
-        private static NLog.Logger logger = NLog.LogManager.GetCurrentClassLogger();
+        private static readonly Logger logger = LogManager.GetCurrentClassLogger();
 #endif
         private static readonly JsonSerializerSettings serializerSettings = new()
         {
@@ -49,6 +50,12 @@ namespace VkNet.ExecuteExtension
         public TimeSpan MaxWaitingTime { get; set; } = TimeSpan.FromMilliseconds(5000);
         public TimeSpan PendingTime { get; set; } = TimeSpan.FromMilliseconds(1000);
 
+        public async ValueTask DisposeAsync()
+        {
+            _cts.Cancel();
+            await _executeHandlerTask.ConfigureAwait(false);
+        }
+
         private async Task ExecuteCycleTask(CancellationToken cancellationToken)
         {
             try
@@ -63,7 +70,7 @@ namespace VkNet.ExecuteExtension
                         for (var i = 0; i < MaxExecuteCount; i++)
                             if (_methodsToExecute.TryDequeue(out var req))
                                 methodsDataChunck.Add(req);
-                            else if(_methodsToExecute.IsEmpty)
+                            else if (_methodsToExecute.IsEmpty)
                                 break;
                         _ = ExecuteRun(methodsDataChunck, cancellationToken);
                     }
@@ -129,27 +136,19 @@ namespace VkNet.ExecuteExtension
             {
                 foreach (var methodData in methods) methodData.Task.SetCanceled(cancellationToken);
             }
-            catch (ErrorExecutingCodeException e)
-            {
-                throw e;
-            }
-
         }
 
         public Task<VkResponse> AddToExecuteAsync(string methodName, VkParameters parameters)
         {
             var tcs = new TaskCompletionSource<VkResponse>();
-            if (_methodsToExecute.IsEmpty)
-            {
-                firstAddTime=DateTime.Now;
-            }
+            if (_methodsToExecute.IsEmpty) firstAddTime = DateTime.Now;
             _methodsToExecute.Enqueue(new MethodData
             {
                 Name = methodName,
                 Parameters = parameters,
                 Task = tcs
             });
-            lastAddTime=DateTime.Now;
+            lastAddTime = DateTime.Now;
             return tcs.Task;
         }
 
@@ -168,11 +167,6 @@ namespace VkNet.ExecuteExtension
         public void Dispose()
         {
             DisposeAsync().AsTask().Wait();
-        }
-        public async ValueTask DisposeAsync()
-        {
-            _cts.Cancel();
-            await _executeHandlerTask.ConfigureAwait(false);
         }
     }
 }
