@@ -7,7 +7,7 @@ namespace VkNet.ExecuteExtension
     {
         public IVkApi VkApi { get; }
         public int MaxExecuteWeight { get; set; }
-        public int CurrentWeight { get; }
+        public int AvailableWeight { get; }
         public IList<T> RequestsToExecute { get; }
         public bool TryAdd(T request);
         public void RequestsReset();

@@ -33,7 +33,7 @@ namespace VkNet.ExecuteExtension
         public void TransferRequests(IVkApiClient<T> vkApiClient)
         {
             var unsuitableData = new Stack<T>();
-            var remainingResultsWeight = vkApiClient.MaxExecuteWeight - vkApiClient.CurrentWeight;
+            var remainingResultsWeight = vkApiClient.AvailableWeight;
             var requestQueues = _requestStorage.Where(x =>
                 !x.IsEmpty && x.TryPeek(out var peakData) && peakData.ExecuteWeight <= remainingResultsWeight);
             foreach (var requestQueue in requestQueues)

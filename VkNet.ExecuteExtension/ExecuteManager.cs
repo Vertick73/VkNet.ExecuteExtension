@@ -4,10 +4,14 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using NLog;
+using VkNet.Abstractions;
 using VkNet.Exception;
 using VkNet.Utils;
+using ILogger = NLog.ILogger;
 
 namespace VkNet.ExecuteExtension
 {
@@ -23,15 +27,29 @@ namespace VkNet.ExecuteExtension
         private readonly Task _executeHandlerTask;
         private List<Task> _executeRunTasks = new();
         private readonly IRequestContainer<MethodData> _requestContainer;
+        private readonly ILogger _logger;
 
         public ExecuteManager(CancellationTokenSource cts, IRequestContainer<MethodData> requestContainer,
-            IEnumerable<IVkApiClient<MethodData>> apiClients)
+            IEnumerable<IVkApiClient<MethodData>> apiClients, ILogger logger = null)
         {
             _cts = cts;
             _requestContainer = requestContainer;
             ApiClients = apiClients;
             _executeHandlerTask = Task.Run(() => ExecuteCycleTask(_cts.Token));
+            _logger = logger;
         }
+
+        public ExecuteManager(CancellationTokenSource cts, IEnumerable<IVkApiClient<MethodData>> apiClients, ILogger logger = null) :this (cts,new RequestContainer<MethodData>(),apiClients,logger)
+        {
+        }
+
+        public ExecuteManager(CancellationTokenSource cts, IEnumerable<IVkApi> vkApis, ILogger logger = null) :this(cts, new RequestContainer<MethodData>(), vkApis.Select(x => new VkApiClient<MethodData>(x)),logger)
+        {
+        }
+        public ExecuteManager(CancellationTokenSource cts, IEnumerable<string> apiTokens, ILogger logger = null) : this(cts, new RequestContainer<MethodData>(), apiTokens.Select(x => new VkApiClient<MethodData>(x)),logger)
+        {
+        }
+
 
         public TimeSpan CheckDelay { get; set; } = TimeSpan.FromMilliseconds(100);
         public TimeSpan MaxWaitingTime { get; set; } = TimeSpan.FromMilliseconds(5000);
