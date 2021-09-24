@@ -8,5 +8,4 @@
     <PackageReference Include="NLog" Version="4.7.10" />
     <PackageReference Include="VkNet" Version="1.66.0" />
   </ItemGroup>
-
-</Project>
+    </Project>
