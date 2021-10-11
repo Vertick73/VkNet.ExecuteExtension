@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -61,15 +60,22 @@ namespace VkNet.ExecuteExtension
             _cts = new CancellationTokenSource();
             _executeHandlerTask = Task.Run(() => ExecuteCycleTask(_cts.Token));
         }
-
+        /// <summary>
+        /// Методы, которые не нужно упаковывать
+        /// </summary>
         public IReadOnlySet<string> SkipMethods
         {
             get => _skipMethods;
             set => _skipMethods = new HashSet<string>(value);
         }
-
+        /// <summary>
+        /// Дефолтный вес методов.
+        /// </summary>
         public int DefaultMethodWeight { get; set; } = 1;
 
+        /// <summary>
+        /// Начальные веса для методов
+        /// </summary>
         public IReadOnlyDictionary<string, int> MethodWeight
         {
             get => _methodWeight;
@@ -82,6 +88,9 @@ namespace VkNet.ExecuteExtension
             set => Interlocked.Exchange(ref _lastAddTimeTicks, value.Ticks);
         }
 
+        /// <summary>
+        /// Максимальный суммарный вес методов при вызове Execute (<=25).
+        /// </summary>
         public int MaxExecute
         {
             get => _maxExecute;
@@ -92,9 +101,17 @@ namespace VkNet.ExecuteExtension
                 Interlocked.Exchange(ref _maxExecute, value);
             }
         }
-
+        /// <summary>
+        /// Задержка проверки Execute
+        /// </summary>
         public TimeSpan CheckDelay { get; set; } = TimeSpan.FromMilliseconds(100);
+        /// <summary>
+        /// Максимальное время ожидания для запроса
+        /// </summary>
         public TimeSpan MaxWaitingTime { get; set; } = TimeSpan.FromMilliseconds(5000);
+        /// <summary>
+        /// Время ожидания новых запросов
+        /// </summary>
         public TimeSpan PendingTime { get; set; } = TimeSpan.FromMilliseconds(1000);
 
         public new VkResponse Call(string methodName, VkParameters parameters, bool skipAuthorization = false)
