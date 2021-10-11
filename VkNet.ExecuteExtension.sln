@@ -5,6 +5,8 @@ VisualStudioVersion = 17.0.31717.71
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VkNet.ExecuteExtension", "VkNet.ExecuteExtension\VkNet.ExecuteExtension.csproj", "{D4261957-07A0-44A7-8606-3DEC109F877E}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VkNet.ExecuteExtension.Tests", "VkNet.ExecuteExtension.Tests\VkNet.ExecuteExtension.Tests.csproj", "{5640493B-70C9-4EA4-8AFE-15C16916A97B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{D4261957-07A0-44A7-8606-3DEC109F877E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D4261957-07A0-44A7-8606-3DEC109F877E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D4261957-07A0-44A7-8606-3DEC109F877E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5640493B-70C9-4EA4-8AFE-15C16916A97B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5640493B-70C9-4EA4-8AFE-15C16916A97B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5640493B-70C9-4EA4-8AFE-15C16916A97B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5640493B-70C9-4EA4-8AFE-15C16916A97B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

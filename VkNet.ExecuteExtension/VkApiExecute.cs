@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -32,10 +33,15 @@ namespace VkNet.ExecuteExtension
         private readonly CancellationTokenSource _cts;
         private readonly Task _executeHandlerTask;
         private readonly ILogger _executeLogger;
+        private readonly List<Task> _executeRunTasks = new();
         private int _currentRequestsWeight;
+        private bool _flush;
 
         private long _lastAddTimeTicks;
         private int _maxExecute = 25;
+
+        private IReadOnlyDictionary<string, int> _methodWeight = new Dictionary<string, int>();
+        private IReadOnlySet<string> _skipMethods = new HashSet<string>();
 
         public VkApiExecute(ILogger<VkApi> logger, ICaptchaSolver captchaSolver = null,
             IAuthorizationFlow authorizationFlow = null) : base(logger, captchaSolver, authorizationFlow)
@@ -56,7 +62,21 @@ namespace VkNet.ExecuteExtension
             _executeHandlerTask = Task.Run(() => ExecuteCycleTask(_cts.Token));
         }
 
-        private DateTime _lastAddTime
+        public IReadOnlySet<string> SkipMethods
+        {
+            get => _skipMethods;
+            set => _skipMethods = new HashSet<string>(value);
+        }
+
+        public int DefaultMethodWeight { get; set; } = 1;
+
+        public IReadOnlyDictionary<string, int> MethodWeight
+        {
+            get => _methodWeight;
+            set => _methodWeight = new Dictionary<string, int>(value);
+        }
+
+        private DateTime LastAddTime
         {
             get => new(Interlocked.Read(ref _lastAddTimeTicks));
             set => Interlocked.Exchange(ref _lastAddTimeTicks, value.Ticks);
@@ -73,23 +93,47 @@ namespace VkNet.ExecuteExtension
             }
         }
 
-        public TimeSpan CheckDelay { get; set; } = TimeSpan.FromMilliseconds(500);
-        public TimeSpan MaxWaitingTime { get; set; } = TimeSpan.FromMilliseconds(3000);
+        public TimeSpan CheckDelay { get; set; } = TimeSpan.FromMilliseconds(100);
+        public TimeSpan MaxWaitingTime { get; set; } = TimeSpan.FromMilliseconds(5000);
         public TimeSpan PendingTime { get; set; } = TimeSpan.FromMilliseconds(1000);
 
-        //[MethodImpl(MethodImplOptions.NoInlining)]
         public new VkResponse Call(string methodName, VkParameters parameters, bool skipAuthorization = false)
         {
             if (methodName == "execute") return base.Call(methodName, parameters, skipAuthorization);
-
+            if (_skipMethods.Contains(methodName)) return base.Call(methodName, parameters, skipAuthorization);
+            var weight = DefaultMethodWeight;
+            if (_methodWeight.TryGetValue(methodName, out var x)) weight = x;
             var tcs = new TaskCompletionSource<VkResponse>();
             var request = new CallRequest
-                { Parameters = parameters, Name = methodName, Task = tcs, AddTime = DateTime.Now };
+            {
+                Parameters = parameters, Name = methodName, Task = tcs, AddTime = DateTime.Now, ExecuteWeight = weight
+            };
             _callRequests.Enqueue(request);
             Interlocked.Add(ref _currentRequestsWeight, request.ExecuteWeight);
-            _lastAddTime = DateTime.Now;
-            //_executeLogger?.Debug($"Добавление метода {methodName} с весом {request.ExecuteWeight} в очередь вызова, с параметрами {string.Join(",", parameters.Where(x => x.Key != Constants.AccessToken).Select(x => $"{x.Key}={x.Value}"))}");
+            LastAddTime = DateTime.Now;
             return tcs.Task.ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+
+        public new void Dispose()
+        {
+            _cts.Cancel();
+            _executeHandlerTask.Wait();
+            base.Dispose();
+        }
+
+        private List<CallRequest> GetRequests()
+        {
+            var requests = new List<CallRequest>();
+            var remainingFreeWeight = _maxExecute;
+            while (_callRequests.TryPeek(out var peak) && peak.ExecuteWeight <= remainingFreeWeight)
+                if (_callRequests.TryDequeue(out var res))
+                {
+                    Interlocked.Add(ref _currentRequestsWeight, -res.ExecuteWeight);
+                    requests.Add(res);
+                    remainingFreeWeight -= res.ExecuteWeight;
+                }
+
+            return requests;
         }
 
         private async Task ExecuteCycleTask(CancellationToken cancellationToken)
@@ -98,42 +142,49 @@ namespace VkNet.ExecuteExtension
             {
                 while (true)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (_currentRequestsWeight >= _maxExecute || IsTimeout())
                     {
-                        var requestsToExecute = new List<CallRequest>();
-                        var remainingFreeWeight = _maxExecute;
-                        while (_callRequests.TryPeek(out var peak) && peak.ExecuteWeight <= remainingFreeWeight)
-                            if (_callRequests.TryDequeue(out var res))
-                            {
-                                Interlocked.Add(ref _currentRequestsWeight, -res.ExecuteWeight);
-                                requestsToExecute.Add(res);
-                                remainingFreeWeight -= res.ExecuteWeight;
-                            }
-
-                        _ = ExecuteRun(requestsToExecute, cancellationToken).ConfigureAwait(false);
+                        var requestsToExecute = GetRequests();
+                        _executeRunTasks.Add(ExecuteRun(requestsToExecute, cancellationToken));
                     }
 
-                    cancellationToken.ThrowIfCancellationRequested();
                     await Task.Delay(CheckDelay, cancellationToken).ConfigureAwait(false);
+                    _executeRunTasks.RemoveAll(x => x.IsCompleted);
                 }
             }
             catch (OperationCanceledException)
             {
+                await Task.WhenAll(_executeRunTasks);
             }
         }
 
         private bool IsTimeout()
         {
             if (_callRequests.IsEmpty) return false;
+            if (_flush)
+            {
+                _flush = false;
+                return true;
+            }
+
             var minTime = DateTime.Now - MaxWaitingTime;
             return
-                DateTime.Now - _lastAddTime >
+                DateTime.Now - LastAddTime >
                 PendingTime || _callRequests.Any(x => x.AddTime < minTime);
+        }
+
+        public void Flush()
+        {
+            _flush = true;
         }
 
         private async Task ExecuteRun(IList<CallRequest> callRequests, CancellationToken cancellationToken)
         {
             if (callRequests.Count == 0) return;
+            if (cancellationToken.IsCancellationRequested)
+                foreach (var callRequest in callRequests)
+                    callRequest.Task.SetCanceled(cancellationToken);
             var executeCode = new StringBuilder("var out = [];");
             var index = 0;
             foreach (var callRequest in callRequests)
@@ -144,21 +195,22 @@ namespace VkNet.ExecuteExtension
             }
 
             executeCode.Append("return out;");
-
             _executeLogger?.Debug(
                 $"Вызов Execute метода с {callRequests.Count} подзапросами и {callRequests.Sum(x => x.ExecuteWeight)} весом запросов. \n[{string.Join(",\n", callRequests.Select(x => $"{{methodName = {x.Name}, weight = {x.ExecuteWeight}, addTime = {x.AddTime}, parameters = {string.Join(",", x.Parameters.Select(x => $"{x.Key}={x.Value}"))}}}"))}]");
 
             try
             {
-                var rawRes = await Execute.ExecuteAsync(executeCode.ToString());
-                cancellationToken.ThrowIfCancellationRequested();
+                var rawRes = await Task.Factory.StartNew(() => Execute.Execute(executeCode.ToString()),
+                    TaskCreationOptions.LongRunning);
                 var res = rawRes.ToListOf(x => x["res"]);
                 for (var i = 0; i < callRequests.Count; i++) callRequests[i].Task.SetResult(res[i]);
                 _executeLogger?.Debug(
                     $"Execute метод успешно выполнен с {callRequests.Count} подзапросами и {callRequests.Sum(x => x.ExecuteWeight)} весом запросов. \n[{string.Join(",\n", callRequests.Select(x => $"{{methodName = {x.Name}, weight = {x.ExecuteWeight}, addTime = {x.AddTime}, parameters = {string.Join(",", x.Parameters.Select(x => $"{x.Key}={x.Value}"))}}}"))}]");
             }
-            catch (TooManyRequestsException)
+            catch (TooManyRequestsException e)
             {
+                _executeLogger?.Debug(
+                    $"{e.Message}. Возврат {callRequests.Count} запросов с весом {callRequests.Sum(x => x.ExecuteWeight)} в очередь");
                 foreach (var methodData in callRequests)
                 {
                     _callRequests.Enqueue(methodData);
@@ -180,14 +232,14 @@ namespace VkNet.ExecuteExtension
             {
                 _executeLogger?.Warn(
                     $"Размер ответа слишком большой. Всего подзапросов {callRequests.Count}, вес подзапросов {callRequests.Sum(x => x.ExecuteWeight)}");
-                _lastAddTime = DateTime.Now;
+                LastAddTime = DateTime.Now;
                 foreach (var methodData in callRequests)
                 {
                     if (methodData.ExecuteWeight < MaxExecute) methodData.ExecuteWeight += 1;
                     _callRequests.Enqueue(methodData);
                     Interlocked.Add(ref _currentRequestsWeight, methodData.ExecuteWeight);
                     _executeLogger?.Debug(
-                        $"Новый вес заспроса {methodData.Name} = {methodData.ExecuteWeight}, параметры {string.Join(",", methodData.Parameters.Where(x => x.Key != Constants.AccessToken).Select(x => $"{x.Key}={x.Value}"))} {methodData.ExecuteWeight}");
+                        $"Новый вес заспроса {methodData.Name} = {methodData.ExecuteWeight}, параметры {string.Join(",", methodData.Parameters.Where(x => x.Key != Constants.AccessToken).Select(x => $"{x.Key}={x.Value}"))}");
                 }
             }
             catch (OperationCanceledException)
@@ -195,6 +247,10 @@ namespace VkNet.ExecuteExtension
                 foreach (var callRequest in callRequests) callRequest.Task.SetCanceled(cancellationToken);
             }
             catch (CaptchaNeededException e)
+            {
+                foreach (var callRequest in callRequests) callRequest.Task.SetException(e);
+            }
+            catch (System.Exception e)
             {
                 foreach (var callRequest in callRequests) callRequest.Task.SetException(e);
             }
