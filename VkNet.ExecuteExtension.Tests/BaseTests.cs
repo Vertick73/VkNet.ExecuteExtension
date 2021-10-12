@@ -14,6 +14,7 @@ using VkNet.Utils;
 namespace VkNet.ExecuteExtension.Tests
 {
     [TestFixture]
+    [Order(1)]
     public class BaseTests
     {
         [OneTimeSetUp]
@@ -27,6 +28,16 @@ namespace VkNet.ExecuteExtension.Tests
 
             vk = new VkApiExecute(log);
             vk.Authorize(new ApiAuthParams { AccessToken = File.ReadAllText("Tokens.txt") });
+        }
+
+        [TearDown]
+        public void FixParms()
+        {
+            vk.MaxExecute = 25;
+            vk.MaxWaitingTime = TimeSpan.FromSeconds(5);
+            vk.PendingTime = TimeSpan.FromSeconds(1);
+            vk.SkipMethods = new HashSet<string>();
+            vk.MethodsWeight = new Dictionary<string, int>();
         }
 
         private Logger log;
@@ -73,7 +84,6 @@ namespace VkNet.ExecuteExtension.Tests
                 $"Run WallGetBigResponseTestMaxExecute: domain={domain}, count={count}, offset={offset}, countLimit={countLimit}, executeLimit={executeLimit}");
             vk.MaxExecute = executeLimit;
             await WallGetBigResponseTest(domain, count, offset, countLimit);
-            vk.MaxExecute = 25;
         }
 
         [Test]
@@ -87,7 +97,6 @@ namespace VkNet.ExecuteExtension.Tests
                 $"Run WallGetBigResponseTestMethodsWeight: domain={domain}, count={count}, offset={offset}, countLimit={countLimit}, methodWeight={methodWeight}");
             vk.MethodsWeight = new Dictionary<string, int> { { "wall.get", methodWeight } };
             await WallGetBigResponseTest(domain, count, offset, countLimit);
-            vk.MethodsWeight = new Dictionary<string, int>();
         }
 
         [Test]
@@ -128,9 +137,6 @@ namespace VkNet.ExecuteExtension.Tests
             stopwatch.Stop();
             Assert.Less(stopwatch.Elapsed, TimeSpan.FromSeconds(10));
             foreach (var resTask in tasks) Assert.AreEqual(resTask.Key.Result.Count, resTask.Value.Count);
-
-            vk.MaxWaitingTime = TimeSpan.FromSeconds(5);
-            vk.PendingTime = TimeSpan.FromSeconds(1);
         }
 
         [Test]
@@ -160,10 +166,6 @@ namespace VkNet.ExecuteExtension.Tests
             // Assert
             Assert.Less(stopwatch.Elapsed, TimeSpan.FromSeconds(10));
             Assert.AreEqual(task.Result.Count, parmsForTask.Count);
-
-            vk.MaxWaitingTime = TimeSpan.FromSeconds(5);
-            vk.PendingTime = TimeSpan.FromSeconds(1);
-            vk.SkipMethods = new HashSet<string>();
         }
     }
 }

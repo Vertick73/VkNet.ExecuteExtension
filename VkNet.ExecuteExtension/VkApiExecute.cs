@@ -140,6 +140,7 @@ namespace VkNet.ExecuteExtension
         {
             _cts.Cancel();
             _executeHandlerTask.Wait();
+            foreach (var callRequest in _callRequests) callRequest.Task.SetCanceled(_cts.Token);
             base.Dispose();
         }
 
@@ -172,7 +173,7 @@ namespace VkNet.ExecuteExtension
                     }
 
                     await Task.Delay(CheckDelay, cancellationToken).ConfigureAwait(false);
-                    _executeRunTasks.RemoveAll(x => x.IsCompleted);
+                    _executeRunTasks.RemoveAll(x => x.IsCompletedSuccessfully);
                 }
             }
             catch (OperationCanceledException)
@@ -205,8 +206,12 @@ namespace VkNet.ExecuteExtension
         {
             if (callRequests.Count == 0) return;
             if (cancellationToken.IsCancellationRequested)
+            {
                 foreach (var callRequest in callRequests)
                     callRequest.Task.SetCanceled(cancellationToken);
+                return;
+            }
+
             var executeCode = new StringBuilder("var out = [];");
             var index = 0;
             foreach (var callRequest in callRequests)
@@ -263,10 +268,6 @@ namespace VkNet.ExecuteExtension
                     _executeLogger?.Debug(
                         $"Новый вес заспроса {methodData.Name} = {methodData.ExecuteWeight}, параметры {string.Join(",", methodData.Parameters.Where(x => x.Key != Constants.AccessToken).Select(x => $"{x.Key}={x.Value}"))}");
                 }
-            }
-            catch (OperationCanceledException)
-            {
-                foreach (var callRequest in callRequests) callRequest.Task.SetCanceled(cancellationToken);
             }
             catch (CaptchaNeededException e)
             {
