@@ -39,7 +39,7 @@ namespace VkNet.ExecuteExtension
         private long _lastAddTimeTicks;
         private int _maxExecute = 25;
 
-        private IReadOnlyDictionary<string, int> _methodWeight = new Dictionary<string, int>();
+        private IReadOnlyDictionary<string, int> _methodsWeight = new Dictionary<string, int>();
         private IReadOnlySet<string> _skipMethods = new HashSet<string>();
 
         public VkApiExecute(ILogger<VkApi> logger, ICaptchaSolver captchaSolver = null,
@@ -60,26 +60,28 @@ namespace VkNet.ExecuteExtension
             _cts = new CancellationTokenSource();
             _executeHandlerTask = Task.Run(() => ExecuteCycleTask(_cts.Token));
         }
+
         /// <summary>
-        /// Методы, которые не нужно упаковывать
+        ///     Методы, которые не нужно упаковывать
         /// </summary>
         public IReadOnlySet<string> SkipMethods
         {
             get => _skipMethods;
             set => _skipMethods = new HashSet<string>(value);
         }
+
         /// <summary>
-        /// Дефолтный вес методов.
+        ///     Дефолтный вес методов.
         /// </summary>
         public int DefaultMethodWeight { get; set; } = 1;
 
         /// <summary>
-        /// Начальные веса для методов
+        ///     Начальные веса для методов
         /// </summary>
-        public IReadOnlyDictionary<string, int> MethodWeight
+        public IReadOnlyDictionary<string, int> MethodsWeight
         {
-            get => _methodWeight;
-            set => _methodWeight = new Dictionary<string, int>(value);
+            get => _methodsWeight;
+            set => _methodsWeight = new Dictionary<string, int>(value);
         }
 
         private DateTime LastAddTime
@@ -89,7 +91,7 @@ namespace VkNet.ExecuteExtension
         }
 
         /// <summary>
-        /// Максимальный суммарный вес методов при вызове Execute (<=25).
+        ///     Максимальный суммарный вес методов при вызове Execute (<=25).
         /// </summary>
         public int MaxExecute
         {
@@ -101,16 +103,19 @@ namespace VkNet.ExecuteExtension
                 Interlocked.Exchange(ref _maxExecute, value);
             }
         }
+
         /// <summary>
-        /// Задержка проверки Execute
+        ///     Задержка проверки Execute
         /// </summary>
         public TimeSpan CheckDelay { get; set; } = TimeSpan.FromMilliseconds(100);
+
         /// <summary>
-        /// Максимальное время ожидания для запроса
+        ///     Максимальное время ожидания для запроса
         /// </summary>
         public TimeSpan MaxWaitingTime { get; set; } = TimeSpan.FromMilliseconds(5000);
+
         /// <summary>
-        /// Время ожидания новых запросов
+        ///     Время ожидания новых запросов
         /// </summary>
         public TimeSpan PendingTime { get; set; } = TimeSpan.FromMilliseconds(1000);
 
@@ -119,7 +124,7 @@ namespace VkNet.ExecuteExtension
             if (methodName == "execute") return base.Call(methodName, parameters, skipAuthorization);
             if (_skipMethods.Contains(methodName)) return base.Call(methodName, parameters, skipAuthorization);
             var weight = DefaultMethodWeight;
-            if (_methodWeight.TryGetValue(methodName, out var x)) weight = x;
+            if (_methodsWeight.TryGetValue(methodName, out var x)) weight = x;
             var tcs = new TaskCompletionSource<VkResponse>();
             var request = new CallRequest
             {

@@ -85,9 +85,9 @@ namespace VkNet.ExecuteExtension.Tests
         {
             log.Debug(
                 $"Run WallGetBigResponseTestMethodsWeight: domain={domain}, count={count}, offset={offset}, countLimit={countLimit}, methodWeight={methodWeight}");
-            vk.MethodWeight = new Dictionary<string, int> { { "wall.get", methodWeight } };
+            vk.MethodsWeight = new Dictionary<string, int> { { "wall.get", methodWeight } };
             await WallGetBigResponseTest(domain, count, offset, countLimit);
-            vk.MethodWeight = new Dictionary<string, int>();
+            vk.MethodsWeight = new Dictionary<string, int>();
         }
 
         [Test]
