@@ -338,3 +338,7 @@ ASALocalRun/
 
 # BeatPulse healthcheck temp database
 healthchecksdb
+/TestApp
+/vk
+/VkNet.ExecuteExtension/CptchCaptchaSolver.cs
+/VkNet.ExecuteExtension.Tests/Tokens.txt

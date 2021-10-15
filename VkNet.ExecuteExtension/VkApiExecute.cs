@@ -46,7 +46,7 @@ namespace VkNet.ExecuteExtension
             IAuthorizationFlow authorizationFlow = null) : base(logger, captchaSolver, authorizationFlow)
         {
             _cts = new CancellationTokenSource();
-            _executeHandlerTask = Task.Run(() => ExecuteCycleTask(_cts.Token));
+            _executeHandlerTask = ExecuteCycleTask(_cts.Token);
         }
 
         public VkApiExecute(ILogger executeLogger, ILogger<VkApi> logger = null, ICaptchaSolver captchaSolver = null,
@@ -58,7 +58,7 @@ namespace VkNet.ExecuteExtension
         public VkApiExecute(IServiceCollection serviceCollection = null) : base(serviceCollection)
         {
             _cts = new CancellationTokenSource();
-            _executeHandlerTask = Task.Run(() => ExecuteCycleTask(_cts.Token));
+            _executeHandlerTask =  ExecuteCycleTask(_cts.Token);
         }
 
         /// <summary>
@@ -228,7 +228,7 @@ namespace VkNet.ExecuteExtension
             try
             {
                 var rawRes = await Task.Factory.StartNew(() => Execute.Execute(executeCode.ToString()),
-                    TaskCreationOptions.LongRunning);
+                    TaskCreationOptions.LongRunning).ConfigureAwait(false);
                 var res = rawRes.ToListOf(x => x["res"]);
                 for (var i = 0; i < callRequests.Count; i++) callRequests[i].Task.SetResult(res[i]);
                 _executeLogger?.Debug(
