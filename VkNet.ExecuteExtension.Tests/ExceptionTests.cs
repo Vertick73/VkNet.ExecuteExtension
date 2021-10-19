@@ -79,19 +79,33 @@ namespace VkNet.ExecuteExtension.Tests
 
         [Test]
         [Parallelizable(ParallelScope.Self)]
-        public async Task CorrectData()
+        public async Task RightAndWrongMethods()
         {
-            log.Debug("Run CorrectData");
-            var task2 = Task.Factory.StartNew(() => vk.Users.GetFollowers(1, 10, 0, ProfileFields.All),
+            var errTask1 = Task.Factory.StartNew(() => vk.Users.GetFollowers(3, 10, 0, ProfileFields.All),
                 TaskCreationOptions.LongRunning);
+
+            await Task.Delay(300);
+            var rightTask = Task.Factory.StartNew(() => vk.Users.GetFollowers(1, 10, 0, ProfileFields.All),
+                TaskCreationOptions.LongRunning);
+
+            var errTask2 = Task.Factory.StartNew(() => vk.Groups.GetMembers(new GroupsGetMembersParams
+            {
+                GroupId = "2",
+                Count = 10
+            }), TaskCreationOptions.LongRunning);
+
+
+            var allTasks = Task.WhenAll(errTask1, rightTask, errTask2);
 
             try
             {
-                await task2;
+                await Task.WhenAll(allTasks);
             }
             catch (System.Exception)
             {
-                Assert.Fail();
+                if (!(allTasks.Exception.InnerExceptions[0] is UserDeletedOrBannedException)) Assert.Fail();
+                if (!(allTasks.Exception.InnerExceptions[1] is CannotBlacklistYourselfException)) Assert.Fail();
+                if (!rightTask.IsCompletedSuccessfully) Assert.Fail();
             }
 
             Assert.Pass();

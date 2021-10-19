@@ -164,6 +164,7 @@ namespace VkNet.ExecuteExtension.Tests
             await task;
 
             // Assert
+            stopwatch.Stop();
             Assert.Less(stopwatch.Elapsed, TimeSpan.FromSeconds(10));
             Assert.AreEqual(task.Result.Count, parmsForTask.Count);
         }

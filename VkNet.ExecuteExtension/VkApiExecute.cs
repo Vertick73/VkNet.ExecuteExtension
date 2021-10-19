@@ -58,7 +58,7 @@ namespace VkNet.ExecuteExtension
         public VkApiExecute(IServiceCollection serviceCollection = null) : base(serviceCollection)
         {
             _cts = new CancellationTokenSource();
-            _executeHandlerTask =  ExecuteCycleTask(_cts.Token);
+            _executeHandlerTask = ExecuteCycleTask(_cts.Token);
         }
 
         /// <summary>
