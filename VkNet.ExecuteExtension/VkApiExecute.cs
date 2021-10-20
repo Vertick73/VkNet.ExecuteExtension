@@ -28,35 +28,46 @@ namespace VkNet.ExecuteExtension
         };
 
         private readonly ConcurrentQueue<CallRequest> _callRequests = new();
-
         private readonly CancellationTokenSource _cts;
         private readonly Task _executeHandlerTask;
         private readonly ILogger _executeLogger;
         private readonly List<Task> _executeRunTasks = new();
+        private readonly int _minThreads;
+        private readonly bool _needOptimization;
+        public readonly TimeSpan MaxOptimizationIdleTime = TimeSpan.FromSeconds(60);
         private int _currentRequestsWeight;
         private bool _flush;
-
+        private bool _isOptimized;
         private long _lastAddTimeTicks;
         private int _maxExecute = 25;
-
         private IReadOnlyDictionary<string, int> _methodsWeight = new Dictionary<string, int>();
+        private int _oldMinThreads;
         private IReadOnlySet<string> _skipMethods = new HashSet<string>();
 
         public VkApiExecute(ILogger<VkApi> logger, ICaptchaSolver captchaSolver = null,
-            IAuthorizationFlow authorizationFlow = null) : base(logger, captchaSolver, authorizationFlow)
+            IAuthorizationFlow authorizationFlow = null, bool optimizationThreadPoolMinThreads = true,
+            int minThreads = 125)
+            : base(logger, captchaSolver, authorizationFlow)
         {
+            _needOptimization = optimizationThreadPoolMinThreads;
+            _minThreads = minThreads;
             _cts = new CancellationTokenSource();
             _executeHandlerTask = ExecuteCycleTask(_cts.Token);
         }
 
         public VkApiExecute(ILogger executeLogger, ILogger<VkApi> logger = null, ICaptchaSolver captchaSolver = null,
-            IAuthorizationFlow authorizationFlow = null) : this(logger, captchaSolver, authorizationFlow)
+            IAuthorizationFlow authorizationFlow = null, bool optimizationThreadPoolMinThreads = true,
+            int minThreads = 125)
+            : this(logger, captchaSolver, authorizationFlow, optimizationThreadPoolMinThreads, minThreads)
         {
             _executeLogger = executeLogger;
         }
 
-        public VkApiExecute(IServiceCollection serviceCollection = null) : base(serviceCollection)
+        public VkApiExecute(IServiceCollection serviceCollection = null, bool optimizationThreadPoolMinThreads = true,
+            int minThreads = 125) : base(serviceCollection)
         {
+            _needOptimization = optimizationThreadPoolMinThreads;
+            _minThreads = minThreads;
             _cts = new CancellationTokenSource();
             _executeHandlerTask = ExecuteCycleTask(_cts.Token);
         }
@@ -140,6 +151,7 @@ namespace VkNet.ExecuteExtension
         {
             _cts.Cancel();
             _executeHandlerTask.Wait();
+            if (_isOptimized) ThreadPoolOptimization(false);
             foreach (var callRequest in _callRequests) callRequest.Task.SetCanceled(_cts.Token);
             base.Dispose();
         }
@@ -168,12 +180,15 @@ namespace VkNet.ExecuteExtension
                     cancellationToken.ThrowIfCancellationRequested();
                     if (_currentRequestsWeight >= _maxExecute || IsTimeout())
                     {
+                        if (!_isOptimized && _needOptimization) ThreadPoolOptimization(true);
                         var requestsToExecute = GetRequests();
                         _executeRunTasks.Add(ExecuteRun(requestsToExecute, cancellationToken));
                     }
 
                     await Task.Delay(CheckDelay, cancellationToken).ConfigureAwait(false);
                     _executeRunTasks.RemoveAll(x => x.IsCompletedSuccessfully);
+                    if (_isOptimized && DateTime.Now - LastAddTime > MaxOptimizationIdleTime)
+                        ThreadPoolOptimization(false);
                 }
             }
             catch (OperationCanceledException)
@@ -197,9 +212,40 @@ namespace VkNet.ExecuteExtension
                 PendingTime || _callRequests.Any(x => x.AddTime < minTime);
         }
 
+        private void ThreadPoolOptimization(bool flag)
+        {
+            if (flag)
+            {
+                ThreadPool.GetMinThreads(out _oldMinThreads, out var completionPortThreads);
+                ThreadPool.SetMinThreads(_minThreads, completionPortThreads);
+                _isOptimized = true;
+            }
+            else
+            {
+                ThreadPool.GetMinThreads(out _, out var completionPortThreads);
+                ThreadPool.SetMinThreads(_oldMinThreads, completionPortThreads);
+                _isOptimized = false;
+            }
+        }
+
         public void Flush()
         {
             _flush = true;
+        }
+
+        private string GenerateExecuteCode(IList<CallRequest> callRequests)
+        {
+            var executeCode = new StringBuilder("var out = [];");
+            var index = 0;
+            foreach (var callRequest in callRequests)
+            {
+                callRequest.ExecuteIndex = index++;
+                executeCode.Append(
+                    $"out.push({{\"id\":{callRequest.ExecuteIndex}, \"res\":API.{callRequest.Name}({JsonConvert.SerializeObject(callRequest.Parameters, SerializerSettings)})}});");
+            }
+
+            executeCode.Append("return out;");
+            return executeCode.ToString();
         }
 
         private async Task ExecuteRun(IList<CallRequest> callRequests, CancellationToken cancellationToken)
@@ -212,22 +258,13 @@ namespace VkNet.ExecuteExtension
                 return;
             }
 
-            var executeCode = new StringBuilder("var out = [];");
-            var index = 0;
-            foreach (var callRequest in callRequests)
-            {
-                callRequest.ExecuteIndex = index++;
-                executeCode.Append(
-                    $"out.push({{\"id\":{callRequest.ExecuteIndex}, \"res\":API.{callRequest.Name}({JsonConvert.SerializeObject(callRequest.Parameters, SerializerSettings)})}});");
-            }
-
-            executeCode.Append("return out;");
+            var code = GenerateExecuteCode(callRequests);
             _executeLogger?.Debug(
                 $"Вызов Execute метода с {callRequests.Count} подзапросами и {callRequests.Sum(x => x.ExecuteWeight)} весом запросов. \n[{string.Join(",\n", callRequests.Select(x => $"{{methodName = {x.Name}, weight = {x.ExecuteWeight}, addTime = {x.AddTime}, parameters = {string.Join(",", x.Parameters.Select(x => $"{x.Key}={x.Value}"))}}}"))}]");
 
             try
             {
-                var rawRes = await Task.Factory.StartNew(() => Execute.Execute(executeCode.ToString()),
+                var rawRes = await Task.Factory.StartNew(() => Execute.Execute(code),
                     TaskCreationOptions.LongRunning).ConfigureAwait(false);
                 var res = rawRes.ToListOf(x => x["res"]);
                 for (var i = 0; i < callRequests.Count; i++) callRequests[i].Task.SetResult(res[i]);
@@ -268,10 +305,6 @@ namespace VkNet.ExecuteExtension
                     _executeLogger?.Debug(
                         $"Новый вес заспроса {methodData.Name} = {methodData.ExecuteWeight}, параметры {string.Join(",", methodData.Parameters.Where(x => x.Key != Constants.AccessToken).Select(x => $"{x.Key}={x.Value}"))}");
                 }
-            }
-            catch (CaptchaNeededException e)
-            {
-                foreach (var callRequest in callRequests) callRequest.Task.SetException(e);
             }
             catch (System.Exception e)
             {
