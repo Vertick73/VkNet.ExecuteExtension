@@ -15,7 +15,6 @@ using VkNet.Exception;
 using VkNet.Infrastructure;
 using VkNet.Utils;
 using VkNet.Utils.AntiCaptcha;
-using ILogger = NLog.ILogger;
 
 namespace VkNet.ExecuteExtension
 {
@@ -30,21 +29,23 @@ namespace VkNet.ExecuteExtension
         private readonly ConcurrentQueue<CallRequest> _callRequests = new();
         private readonly CancellationTokenSource _cts;
         private readonly Task _executeHandlerTask;
-        private readonly ILogger _executeLogger;
+        private readonly ILogger<VkApiExecute> _executeLogger;
         private readonly List<Task> _executeRunTasks = new();
+        private readonly ServiceProvider _executeServiceProvider;
         private readonly int _minThreads;
         private readonly bool _needOptimization;
         public readonly TimeSpan MaxOptimizationIdleTime = TimeSpan.FromSeconds(60);
         private int _currentRequestsWeight;
-        private bool _flush;
+        private volatile bool _flush;
         private bool _isOptimized;
         private long _lastAddTimeTicks;
-        private int _maxExecute = 25;
+        private volatile int _maxExecute = 25;
         private IReadOnlyDictionary<string, int> _methodsWeight = new Dictionary<string, int>();
         private int _oldMinThreads;
         private IReadOnlySet<string> _skipMethods = new HashSet<string>();
 
-        public VkApiExecute(ILogger<VkApi> logger, ICaptchaSolver captchaSolver = null,
+        public VkApiExecute(ILogger<VkApi> logger, ILogger<VkApiExecute> executeLogger = null,
+            ICaptchaSolver captchaSolver = null,
             IAuthorizationFlow authorizationFlow = null, bool optimizationThreadPoolMinThreads = true,
             int minThreads = 125)
             : base(logger, captchaSolver, authorizationFlow)
@@ -53,13 +54,6 @@ namespace VkNet.ExecuteExtension
             _minThreads = minThreads;
             _cts = new CancellationTokenSource();
             _executeHandlerTask = ExecuteCycleTask(_cts.Token);
-        }
-
-        public VkApiExecute(ILogger executeLogger, ILogger<VkApi> logger = null, ICaptchaSolver captchaSolver = null,
-            IAuthorizationFlow authorizationFlow = null, bool optimizationThreadPoolMinThreads = true,
-            int minThreads = 125)
-            : this(logger, captchaSolver, authorizationFlow, optimizationThreadPoolMinThreads, minThreads)
-        {
             _executeLogger = executeLogger;
         }
 
@@ -70,10 +64,17 @@ namespace VkNet.ExecuteExtension
             _minThreads = minThreads;
             _cts = new CancellationTokenSource();
             _executeHandlerTask = ExecuteCycleTask(_cts.Token);
+
+            if (serviceCollection != null)
+            {
+                serviceCollection.RegisterDefaultDependencies();
+                _executeServiceProvider = serviceCollection.BuildServiceProvider();
+                _executeLogger = _executeServiceProvider.GetService<ILogger<VkApiExecute>>();
+            }
         }
 
         /// <summary>
-        ///     Методы, которые не нужно упаковывать
+        /// Методы, которые не нужно упаковывать
         /// </summary>
         public IReadOnlySet<string> SkipMethods
         {
@@ -82,12 +83,12 @@ namespace VkNet.ExecuteExtension
         }
 
         /// <summary>
-        ///     Дефолтный вес методов.
+        /// Дефолтный вес методов.
         /// </summary>
         public int DefaultMethodWeight { get; set; } = 1;
 
         /// <summary>
-        ///     Начальные веса для методов
+        /// Начальные веса для методов
         /// </summary>
         public IReadOnlyDictionary<string, int> MethodsWeight
         {
@@ -102,7 +103,7 @@ namespace VkNet.ExecuteExtension
         }
 
         /// <summary>
-        ///     Максимальный суммарный вес методов при вызове Execute (<=25).
+        /// Максимальный суммарный вес методов при вызове Execute (<=25).
         /// </summary>
         public int MaxExecute
         {
@@ -111,22 +112,22 @@ namespace VkNet.ExecuteExtension
             {
                 if (value < 1 || value > 25)
                     throw new ArgumentException(@"Value must be positive and <=25", nameof(value));
-                Interlocked.Exchange(ref _maxExecute, value);
+                _maxExecute = value;
             }
         }
 
         /// <summary>
-        ///     Задержка проверки Execute
+        /// Задержка проверки Execute
         /// </summary>
         public TimeSpan CheckDelay { get; set; } = TimeSpan.FromMilliseconds(100);
 
         /// <summary>
-        ///     Максимальное время ожидания для запроса
+        /// Максимальное время ожидания для запроса
         /// </summary>
         public TimeSpan MaxWaitingTime { get; set; } = TimeSpan.FromMilliseconds(5000);
 
         /// <summary>
-        ///     Время ожидания новых запросов
+        /// Время ожидания новых запросов
         /// </summary>
         public TimeSpan PendingTime { get; set; } = TimeSpan.FromMilliseconds(1000);
 
@@ -259,7 +260,7 @@ namespace VkNet.ExecuteExtension
             }
 
             var code = GenerateExecuteCode(callRequests);
-            _executeLogger?.Debug(
+            _executeLogger?.LogTrace(
                 $"Вызов Execute метода с {callRequests.Count} подзапросами и {callRequests.Sum(x => x.ExecuteWeight)} весом запросов. \n[{string.Join(",\n", callRequests.Select(x => $"{{methodName = {x.Name}, weight = {x.ExecuteWeight}, addTime = {x.AddTime}, parameters = {string.Join(",", x.Parameters.Select(x => $"{x.Key}={x.Value}"))}}}"))}]");
 
             try
@@ -268,12 +269,12 @@ namespace VkNet.ExecuteExtension
                     TaskCreationOptions.LongRunning).ConfigureAwait(false);
                 var res = rawRes.ToListOf(x => x["res"]);
                 for (var i = 0; i < callRequests.Count; i++) callRequests[i].Task.SetResult(res[i]);
-                _executeLogger?.Debug(
+                _executeLogger?.LogTrace(
                     $"Execute метод успешно выполнен с {callRequests.Count} подзапросами и {callRequests.Sum(x => x.ExecuteWeight)} весом запросов. \n[{string.Join(",\n", callRequests.Select(x => $"{{methodName = {x.Name}, weight = {x.ExecuteWeight}, addTime = {x.AddTime}, parameters = {string.Join(",", x.Parameters.Select(x => $"{x.Key}={x.Value}"))}}}"))}]");
             }
             catch (TooManyRequestsException e)
             {
-                _executeLogger?.Debug(
+                _executeLogger?.LogTrace(
                     $"{e.Message}. Возврат {callRequests.Count} запросов с весом {callRequests.Sum(x => x.ExecuteWeight)} в очередь");
                 foreach (var methodData in callRequests)
                 {
@@ -294,7 +295,7 @@ namespace VkNet.ExecuteExtension
             }
             catch (ErrorExecutingCodeException)
             {
-                _executeLogger?.Warn(
+                _executeLogger?.LogWarning(
                     $"Размер ответа слишком большой. Всего подзапросов {callRequests.Count}, вес подзапросов {callRequests.Sum(x => x.ExecuteWeight)}");
                 LastAddTime = DateTime.Now;
                 foreach (var methodData in callRequests)
@@ -302,7 +303,7 @@ namespace VkNet.ExecuteExtension
                     if (methodData.ExecuteWeight < MaxExecute) methodData.ExecuteWeight += 1;
                     _callRequests.Enqueue(methodData);
                     Interlocked.Add(ref _currentRequestsWeight, methodData.ExecuteWeight);
-                    _executeLogger?.Debug(
+                    _executeLogger?.LogWarning(
                         $"Новый вес заспроса {methodData.Name} = {methodData.ExecuteWeight}, параметры {string.Join(",", methodData.Parameters.Where(x => x.Key != Constants.AccessToken).Select(x => $"{x.Key}={x.Value}"))}");
                 }
             }

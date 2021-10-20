@@ -1,11 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
-using NLog;
-using NLog.Config;
-using NLog.Targets;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Serilog;
+using Serilog.Events;
 using VkNet.ExecuteExtension;
 using VkNet.Model;
 using VkNet.Model.RequestParams;
@@ -17,13 +17,22 @@ namespace ExampleApp
         private static async Task Main(string[] args)
         {
             //Логирование в консоль для отладки
-            var config = new LoggingConfiguration();
-            var logconsole = new ConsoleTarget("logconsole");
-            config.AddRule(LogLevel.Trace, LogLevel.Fatal, logconsole);
-            LogManager.Configuration = config;
-            var log = LogManager.GetCurrentClassLogger();
+            Log.Logger = new LoggerConfiguration()
+                //.MinimumLevel.Verbose()
+                .MinimumLevel.Override("VkNet.ExecuteExtension", LogEventLevel.Verbose)
+                .MinimumLevel.Override("ExampleApp", LogEventLevel.Fatal)
+                .WriteTo.Console()
+                .CreateLogger();
 
-            var vk = new VkApiExecute(log);
+            var serviceCollection = new ServiceCollection()
+                .AddLogging(loggingBuilder =>
+                {
+                    loggingBuilder.ClearProviders();
+                    loggingBuilder.SetMinimumLevel(LogLevel.Trace);
+                    loggingBuilder.AddSerilog(dispose: true);
+                });
+
+            var vk = new VkApiExecute(serviceCollection);
             vk.Authorize(new ApiAuthParams
             {
                 AccessToken = "your token"
@@ -38,24 +47,18 @@ namespace ExampleApp
             // => за один вызов execute можно вытащить ~500 постов
             var tasks = new List<Task<WallGetObject>>();
             for (ulong i = 0; i < 2000; i += 100)
-            {
-                var parmsForTask = new WallGetParams
+                tasks.Add(vk.Wall.GetAsync(new WallGetParams
                 {
                     Domain = "internetpasta",
                     Count = 100,
                     Offset = i
-                };
-                var task = Task.Factory.StartNew(() => vk.Wall.Get(parmsForTask), TaskCreationOptions.LongRunning);
-                tasks.Add(task);
-            }
+                }));
 
             await Task.WhenAll(tasks);
             stopwatch.Stop();
-            Console.ForegroundColor = ConsoleColor.DarkGreen;
-            Console.WriteLine(
+            Log.Information(
                 $"Данные успешно получены. Всего постов получено: {tasks.Sum(x => x.Result.WallPosts.Count)}");
-            Console.WriteLine($"Время выполнения всех запросов: {stopwatch.ElapsedMilliseconds} мс");
-            Console.ResetColor();
+            Log.Information($"Время выполнения всех запросов: {stopwatch.ElapsedMilliseconds} мс");
 
             stopwatch.Reset();
             stopwatch.Start();
@@ -63,25 +66,18 @@ namespace ExampleApp
             vk.MaxExecute = 20;
             vk.MethodsWeight = new Dictionary<string, int>(); //отчистка особых начальных весов
             var tasks2 = new List<Task<WallGetObject>>();
-            for (ulong i = 0; i < 3500; i += 100)
-            {
-                var parmsForTask = new WallGetParams
+            for (ulong i = 0; i < 3300; i += 100)
+                tasks2.Add(vk.Wall.GetAsync(new WallGetParams
                 {
                     Domain = "reddit",
                     Count = 100,
                     Offset = i
-                };
-                var task = Task.Factory.StartNew(() => vk.Wall.Get(parmsForTask), TaskCreationOptions.LongRunning);
-                tasks2.Add(task);
-            }
-
+                }));
             await Task.WhenAll(tasks2);
             stopwatch.Stop();
-            Console.ForegroundColor = ConsoleColor.DarkGreen;
-            Console.WriteLine(
+            Log.Information(
                 $"Данные успешно получены. Всего постов получено: {tasks2.Sum(x => x.Result.WallPosts.Count)}");
-            Console.WriteLine($"Время выполнения всех запросов: {stopwatch.ElapsedMilliseconds} мс");
-            Console.ResetColor();
+            Log.Information($"Время выполнения всех запросов: {stopwatch.ElapsedMilliseconds} мс");
         }
     }
 }
