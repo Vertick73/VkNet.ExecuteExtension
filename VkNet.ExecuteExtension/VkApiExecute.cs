@@ -12,7 +12,6 @@ using Newtonsoft.Json.Linq;
 using VkNet.Abstractions;
 using VkNet.Abstractions.Authorization;
 using VkNet.Exception;
-using VkNet.Infrastructure;
 using VkNet.Utils;
 using VkNet.Utils.AntiCaptcha;
 
@@ -22,8 +21,7 @@ namespace VkNet.ExecuteExtension
     {
         private static readonly JsonSerializerSettings SerializerSettings = new()
         {
-            NullValueHandling = NullValueHandling.Ignore,
-            DefaultValueHandling = DefaultValueHandling.Ignore
+            NullValueHandling = NullValueHandling.Ignore
         };
 
         private readonly ConcurrentQueue<CallRequest> _callRequests = new();
@@ -36,6 +34,7 @@ namespace VkNet.ExecuteExtension
         private readonly bool _needOptimization;
         public readonly TimeSpan MaxOptimizationIdleTime = TimeSpan.FromSeconds(60);
         private int _currentRequestsWeight;
+        private bool _disposed;
         private volatile bool _flush;
         private bool _isOptimized;
         private long _lastAddTimeTicks;
@@ -72,6 +71,8 @@ namespace VkNet.ExecuteExtension
                 _executeLogger = _executeServiceProvider.GetService<ILogger<VkApiExecute>>();
             }
         }
+
+        public int CurrentRequestsWeight => _currentRequestsWeight;
 
         /// <summary>
         /// Методы, которые не нужно упаковывать
@@ -148,13 +149,17 @@ namespace VkNet.ExecuteExtension
             return tcs.Task.ConfigureAwait(false).GetAwaiter().GetResult();
         }
 
-        public new void Dispose()
+        protected override void Dispose(bool disposing)
         {
-            _cts.Cancel();
-            _executeHandlerTask.Wait();
-            if (_isOptimized) ThreadPoolOptimization(false);
-            foreach (var callRequest in _callRequests) callRequest.Task.SetCanceled(_cts.Token);
-            base.Dispose();
+            if (!_disposed)
+            {
+                _cts.Cancel();
+                _executeHandlerTask.Wait();
+                if (_isOptimized) ThreadPoolOptimization(false);
+                foreach (var callRequest in _callRequests) callRequest.Task.SetCanceled(_cts.Token);
+                base.Dispose(disposing);
+                _disposed = true;
+            }
         }
 
         private List<CallRequest> GetRequests()
@@ -184,6 +189,8 @@ namespace VkNet.ExecuteExtension
                         if (!_isOptimized && _needOptimization) ThreadPoolOptimization(true);
                         var requestsToExecute = GetRequests();
                         _executeRunTasks.Add(ExecuteRun(requestsToExecute, cancellationToken));
+                        await Task.Delay(1000 / RequestsPerSecond - 100 / RequestsPerSecond, cancellationToken)
+                            .ConfigureAwait(false);
                     }
 
                     await Task.Delay(CheckDelay, cancellationToken).ConfigureAwait(false);
@@ -260,8 +267,7 @@ namespace VkNet.ExecuteExtension
             }
 
             var code = GenerateExecuteCode(callRequests);
-            _executeLogger?.LogTrace(
-                $"Вызов Execute метода с {callRequests.Count} подзапросами и {callRequests.Sum(x => x.ExecuteWeight)} весом запросов. \n[{string.Join(",\n", callRequests.Select(x => $"{{methodName = {x.Name}, weight = {x.ExecuteWeight}, addTime = {x.AddTime}, parameters = {string.Join(",", x.Parameters.Select(x => $"{x.Key}={x.Value}"))}}}"))}]");
+            _executeLogger?.LogTrace("Вызов Execute метода. {stat}", PrettyExecuteLogPrint(callRequests, true));
 
             try
             {
@@ -269,8 +275,8 @@ namespace VkNet.ExecuteExtension
                     TaskCreationOptions.LongRunning).ConfigureAwait(false);
                 var res = rawRes.ToListOf(x => x["res"]);
                 for (var i = 0; i < callRequests.Count; i++) callRequests[i].Task.SetResult(res[i]);
-                _executeLogger?.LogTrace(
-                    $"Execute метод успешно выполнен с {callRequests.Count} подзапросами и {callRequests.Sum(x => x.ExecuteWeight)} весом запросов. \n[{string.Join(",\n", callRequests.Select(x => $"{{methodName = {x.Name}, weight = {x.ExecuteWeight}, addTime = {x.AddTime}, parameters = {string.Join(",", x.Parameters.Select(x => $"{x.Key}={x.Value}"))}}}"))}]");
+                _executeLogger?.LogTrace("Execute метод успешно выполнен. {stat}",
+                    PrettyExecuteLogPrint(callRequests, true));
             }
             catch (TooManyRequestsException e)
             {
@@ -295,22 +301,43 @@ namespace VkNet.ExecuteExtension
             }
             catch (ErrorExecutingCodeException)
             {
-                _executeLogger?.LogWarning(
-                    $"Размер ответа слишком большой. Всего подзапросов {callRequests.Count}, вес подзапросов {callRequests.Sum(x => x.ExecuteWeight)}");
+                _executeLogger?.LogWarning("Размер ответа слишком большой. {stat}",
+                    PrettyExecuteLogPrint(callRequests, false));
                 LastAddTime = DateTime.Now;
                 foreach (var methodData in callRequests)
                 {
                     if (methodData.ExecuteWeight < MaxExecute) methodData.ExecuteWeight += 1;
                     _callRequests.Enqueue(methodData);
                     Interlocked.Add(ref _currentRequestsWeight, methodData.ExecuteWeight);
-                    _executeLogger?.LogWarning(
-                        $"Новый вес заспроса {methodData.Name} = {methodData.ExecuteWeight}, параметры {string.Join(",", methodData.Parameters.Where(x => x.Key != Constants.AccessToken).Select(x => $"{x.Key}={x.Value}"))}");
+                    _executeLogger?.LogWarning("Новый вес заспроса {name} = {weight}, parameters = {{{parm}}}",
+                        methodData.Name, methodData.ExecuteWeight,
+                        string.Join(", ", methodData.Parameters.Select(x => $"{x.Key}={x.Value}")));
                 }
             }
             catch (System.Exception e)
             {
                 foreach (var callRequest in callRequests) callRequest.Task.SetException(e);
             }
+        }
+
+        private string PrettyExecuteLogPrint(IList<CallRequest> requests, bool extend)
+        {
+            var stringRes = $"Количество подзапросов: {requests.Count}, вес: {requests.Sum(x => x.ExecuteWeight)}";
+            if (!extend) return stringRes;
+            var res = new StringBuilder(stringRes);
+            res.Append($"{Environment.NewLine}[");
+            foreach (var request in requests)
+            {
+                res.Append(
+                    $"{{methodName = {request.Name}, weight = {request.ExecuteWeight}, addTime = {request.AddTime}, ");
+                res.Append(
+                    $"parameters = {{{string.Join(",", request.Parameters.Select(x => $"{x.Key}={x.Value}"))}}}");
+                res.Append($",{Environment.NewLine}");
+            }
+
+            res.Remove(res.Length - 3, 3);
+            res.Append(']');
+            return res.ToString();
         }
     }
 }

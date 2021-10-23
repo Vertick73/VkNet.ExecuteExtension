@@ -18,9 +18,7 @@ namespace ExampleApp
         {
             //Логирование в консоль для отладки
             Log.Logger = new LoggerConfiguration()
-                //.MinimumLevel.Verbose()
                 .MinimumLevel.Override("VkNet.ExecuteExtension", LogEventLevel.Verbose)
-                .MinimumLevel.Override("ExampleApp", LogEventLevel.Fatal)
                 .WriteTo.Console()
                 .CreateLogger();
 
