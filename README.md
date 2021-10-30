@@ -1,7 +1,9 @@
 # VkNet.ExecuteExtension
 Расширение для библиотеки [VkNet](https://github.com/vknet/vk) реализующее упаковку запросов через метод [Execute](https://vk.com/dev/execute).
 ## Описание
-Перехват запроса и его упаковка происходи на уровне вызова метода `Call` внутри класса `VkApi` из библиотеки [VkNet](https://github.com/vknet/vk). Все вызовы методов за исключением, указанных в параметре `SkipMethods`, перехватываются для упаковки включая обычные и асинхронные их версии.
+Перехват запроса и его упаковка происходи на уровне вызова метода `Call` внутри класса `VkApi` из библиотеки [VkNet](https://github.com/vknet/vk).  
+Все вызовы методов за исключением, указанных в параметре `SkipMethods`, перехватываются для упаковки включая обычные и асинхронные их версии.  
+Возврат ошибок работает для каждого вызываемого метода и не фейлит остальные упакованные методы.  
 
 ***Execute метод имеет ограничение на объем ответа = 5 МБ.*** Для оптимальной работы иногда придётся подбирать веса. 
 
@@ -13,7 +15,9 @@
 ```csharp
 VkApiExecute vk = new VkApiExecute();
 vk.Authorize(new ApiAuthParams { AccessToken = "Your Token" });
-
+```
+*Не обязательные параметры.*
+```csharp 
 vk.MaxExecute = 25;                                                     //Максимальный суммарный вес методов при вызове Execute. <=25
 vk.DefaultMethodWeight = 1;                                             //Стандартный начальный вес методов
 vk.MethodsWeight = new Dictionary<string, int>() { { "wall.get", 3 } }; //Особые начальные веса для методов
@@ -24,47 +28,33 @@ vk.PendingTime = TimeSpan.FromSeconds(1);                               //Вре
 
 ```
 ### Вызов методов
-При вызове методов желательно использовать параметр TaskCreationOptions.LongRunning. 
 ```csharp
-var task = Task.Factory.StartNew(() => vk.Wall.Get(new WallGetParams()
-{
-    Domain = "spacex",
-    Count = 100,
-    Offset = 0
-}), TaskCreationOptions.LongRunning);
-await task;
+var res = await vk.Wall.GetAsync(new WallGetParams(){...});
 ```
-Или так
-```csharp
-var task = new Task<WallGetObject>(() => vk.Wall.Get(new WallGetParams()
-{
-    Domain = "spacex",
-    Count = 100,
-    Offset = 0
-}), TaskCreationOptions.LongRunning);
-task.Start();
-await task;
-```
-Без TaskCreationOptions.LongRunning возможны ухудшение производительности на начальных этапах, когда ThreadPool не выделил ещё достаточное число потоков.
-
-Вызов методов ничем не отличается от библиотеки [VkNet](https://github.com/vknet/vk).
-```csharp
-var task =Task.Run(() => vk.Wall.Get(new WallGetParams(){...}));
-await task;
-```
+Если новых запросов не предвидется можно использовать `Flush()` для мгновенного формирования Execute запроса. 
 ```csharp
 var task = vk.Wall.GetAsync(new WallGetParams(){...});
+vk.Flush();
 await task;
 ```
 ### Подборка весов
-При необходимости для повышения производительности можно подобрать оптимальные веса каждого метода API. Самый простой способ подобрать их через логи.
+#### При необходимости для повышения производительности можно подобрать оптимальные веса каждого метода API. Самый простой способ подобрать их через логи.
+Пример логирования с использование Serilog.
 ```csharp
-var config = new LoggingConfiguration();
-var logfile = new FileTarget("logfile") { FileName = "TestLogs.txt", DeleteOldFileOnStartup = true };
-config.AddRule(LogLevel.Trace, LogLevel.Fatal, logfile);
-LogManager.Configuration = config;
-Logger log = LogManager.GetCurrentClassLogger();
-VkApiExecute vk = new VkApiExecute(log);
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Override("VkNet.ExecuteExtension", LogEventLevel.Verbose)
+    .WriteTo.Console()
+    .CreateLogger();
+
+var serviceCollection = new ServiceCollection()
+    .AddLogging(loggingBuilder =>
+    {
+        loggingBuilder.ClearProviders();
+        loggingBuilder.SetMinimumLevel(LogLevel.Trace);
+        loggingBuilder.AddSerilog(dispose: true);
+    });
+
+var vk = new VkApiExecute(serviceCollection);
 ...
 ```
 
