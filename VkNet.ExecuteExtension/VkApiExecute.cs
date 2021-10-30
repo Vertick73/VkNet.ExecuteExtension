@@ -42,6 +42,7 @@ namespace VkNet.ExecuteExtension
         private IReadOnlyDictionary<string, int> _methodsWeight = new Dictionary<string, int>();
         private int _oldMinThreads;
         private IReadOnlySet<string> _skipMethods = new HashSet<string>();
+        public readonly int ConcurrentExecuteRequests = 5;
 
         public VkApiExecute(ILogger<VkApi> logger, ILogger<VkApiExecute> executeLogger = null,
             ICaptchaSolver captchaSolver = null,
@@ -188,15 +189,17 @@ namespace VkNet.ExecuteExtension
                     {
                         if (!_isOptimized && _needOptimization) ThreadPoolOptimization(true);
                         var requestsToExecute = GetRequests();
+                        if (_executeRunTasks.Count > ConcurrentExecuteRequests)
+                        {
+                            await Task.WhenAny(_executeRunTasks);
+                            _executeRunTasks.RemoveAll(x => x.IsCompletedSuccessfully);
+                        }
                         _executeRunTasks.Add(ExecuteRun(requestsToExecute, cancellationToken));
-                        await Task.Delay(1000 / RequestsPerSecond - 100 / RequestsPerSecond, cancellationToken)
-                            .ConfigureAwait(false);
                     }
 
-                    await Task.Delay(CheckDelay, cancellationToken).ConfigureAwait(false);
-                    _executeRunTasks.RemoveAll(x => x.IsCompletedSuccessfully);
                     if (_isOptimized && DateTime.Now - LastAddTime > MaxOptimizationIdleTime)
                         ThreadPoolOptimization(false);
+                    await Task.Delay(CheckDelay);
                 }
             }
             catch (OperationCanceledException)
@@ -241,7 +244,7 @@ namespace VkNet.ExecuteExtension
             _flush = true;
         }
 
-        private string GenerateExecuteCode(IList<CallRequest> callRequests)
+        private static string GenerateExecuteCode(IList<CallRequest> callRequests)
         {
             var executeCode = new StringBuilder("var out = [];");
             var index = 0;
@@ -320,7 +323,7 @@ namespace VkNet.ExecuteExtension
             }
         }
 
-        private string PrettyExecuteLogPrint(IList<CallRequest> requests, bool extend)
+        private static string PrettyExecuteLogPrint(IList<CallRequest> requests, bool extend)
         {
             var stringRes = $"Количество подзапросов: {requests.Count}, вес: {requests.Sum(x => x.ExecuteWeight)}";
             if (!extend) return stringRes;
