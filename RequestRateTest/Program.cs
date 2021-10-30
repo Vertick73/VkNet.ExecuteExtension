@@ -21,7 +21,7 @@ namespace RequestRateTest
                 AccessToken = "your token"
             });
             var benchmark =
-                new Benchmark<GroupsGetMembersParams>(ParamsProducer, TestConsumer, 100, 100, TimeSpan.FromSeconds(50));
+                new Benchmark<GroupsGetMembersParams>(ParamsProducer, TestConsumer, 100, 100, TimeSpan.FromSeconds(30));
             await benchmark.RunerTask;
         }
         
@@ -34,8 +34,7 @@ namespace RequestRateTest
                 {
                     Count = 1000,
                     Offset = offset,
-                    Fields = UsersFields.All,
-                    GroupId = "eddit"
+                    GroupId = "reddit"
                 };
                 offset += 1000;
             }
