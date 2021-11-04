@@ -6,11 +6,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Events;
-using VkNet.ExecuteExtension;
 using VkNet.Model;
 using VkNet.Model.RequestParams;
 
-namespace ExampleApp
+namespace VkNet.ExecuteExtension.ExampleApp
 {
     internal class Program
     {

@@ -10,7 +10,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\VkNet.ExecuteExtension\VkNet.ExecuteExtension.csproj" />
+    <ProjectReference Include="..\..\VkNet.ExecuteExtension\VkNet.ExecuteExtension.csproj" />
   </ItemGroup>
 
 </Project>

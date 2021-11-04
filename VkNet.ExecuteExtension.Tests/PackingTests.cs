@@ -102,7 +102,7 @@ namespace VkNet.ExecuteExtension.Tests
             }
             catch (System.Exception)
             {
-                Assert.AreEqual(rightTask1.IsCompletedSuccessfully,true);
+                Assert.AreEqual(rightTask1.IsCompletedSuccessfully, true);
                 Assert.AreEqual(rightTask1.Result.Count, resCount);
                 Assert.AreEqual(rightTask2.IsCompletedSuccessfully, true);
                 Assert.AreEqual(rightTask2.Result.Count, resCount);

@@ -32,7 +32,6 @@ namespace VkNet.ExecuteExtension
         private readonly ServiceProvider _executeServiceProvider;
         private readonly int _minThreads;
         private readonly bool _needOptimization;
-        public readonly TimeSpan MaxOptimizationIdleTime = TimeSpan.FromSeconds(60);
         private int _currentRequestsWeight;
         private bool _disposed;
         private volatile bool _flush;
@@ -42,7 +41,6 @@ namespace VkNet.ExecuteExtension
         private IReadOnlyDictionary<string, int> _methodsWeight = new Dictionary<string, int>();
         private int _oldMinThreads;
         private IReadOnlySet<string> _skipMethods = new HashSet<string>();
-        public readonly int ConcurrentExecuteRequests = 5;
 
         public VkApiExecute(ILogger<VkApi> logger, ILogger<VkApiExecute> executeLogger = null,
             ICaptchaSolver captchaSolver = null,
@@ -72,6 +70,9 @@ namespace VkNet.ExecuteExtension
                 _executeLogger = _executeServiceProvider.GetService<ILogger<VkApiExecute>>();
             }
         }
+
+        public int ConcurrentExecuteRequests { get; init; } = 5;
+        public TimeSpan MaxOptimizationIdleTime { get; init; } = TimeSpan.FromSeconds(60);
 
         public int CurrentRequestsWeight => _currentRequestsWeight;
 
@@ -194,6 +195,7 @@ namespace VkNet.ExecuteExtension
                             await Task.WhenAny(_executeRunTasks);
                             _executeRunTasks.RemoveAll(x => x.IsCompletedSuccessfully);
                         }
+
                         _executeRunTasks.Add(ExecuteRun(requestsToExecute, cancellationToken));
                     }
 

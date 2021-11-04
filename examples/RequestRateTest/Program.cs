@@ -2,21 +2,19 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using VkNet.Abstractions;
-using VkNet.Enums.Filters;
-using VkNet.ExecuteExtension;
 using VkNet.Model;
 using VkNet.Model.RequestParams;
 
-namespace RequestRateTest
+namespace VkNet.ExecuteExtension.RequestRateTest
 {
     internal class Program
     {
-        private static IVkApi vkApiExec;
+        private static IVkApi _vkApiExec;
 
         private static async Task Main(string[] args)
         {
-            vkApiExec = new VkApiExecute();
-            vkApiExec.Authorize(new ApiAuthParams
+            _vkApiExec = new VkApiExecute();
+            _vkApiExec.Authorize(new ApiAuthParams
             {
                 AccessToken = "your token"
             });
@@ -24,7 +22,7 @@ namespace RequestRateTest
                 new Benchmark<GroupsGetMembersParams>(ParamsProducer, TestConsumer, 100, 100, TimeSpan.FromSeconds(30));
             await benchmark.RunerTask;
         }
-        
+
         public static IEnumerable<GroupsGetMembersParams> ParamsProducer()
         {
             var offset = 0;
@@ -42,7 +40,7 @@ namespace RequestRateTest
 
         public static async Task TestConsumer(GroupsGetMembersParams @params)
         {
-            await vkApiExec.Groups.GetMembersAsync(@params);
+            await _vkApiExec.Groups.GetMembersAsync(@params);
         }
     }
 }

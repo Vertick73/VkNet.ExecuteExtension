@@ -5,16 +5,16 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 
-namespace RequestRateTest
+namespace VkNet.ExecuteExtension.RequestRateTest
 {
     public class Benchmark<T>
     {
         private readonly Func<T, Task> _consumer;
         private readonly CancellationTokenSource _cts;
         private readonly Func<IEnumerable<T>> _producer;
+        private readonly Task _producerTask;
         private readonly Channel<T> _queue;
         private readonly List<Task> _workers;
-        private Task _producerTask;
         private int _stat;
         public Task RunerTask;
 
@@ -43,7 +43,7 @@ namespace RequestRateTest
             {
                 prevStat = _stat;
                 stopwatch.Start();
-                await Task.Delay(5000);
+                await Task.Delay(statInterval);
                 stopwatch.Stop();
                 var rps = (_stat - prevStat) / (stopwatch.ElapsedMilliseconds / 1000.0);
                 Console.WriteLine($"{DateTime.Now:HH:mm:ss}|Requests per second: {rps:0.00}\t Total: {_stat}");
@@ -67,7 +67,7 @@ namespace RequestRateTest
             catch (OperationCanceledException)
             {
             }
-            catch (Exception ex)
+            catch (System.Exception ex)
             {
                 Console.WriteLine(ex);
                 throw;
@@ -89,7 +89,7 @@ namespace RequestRateTest
             catch (OperationCanceledException)
             {
             }
-            catch (Exception ex)
+            catch (System.Exception ex)
             {
                 Console.WriteLine(ex);
                 throw;

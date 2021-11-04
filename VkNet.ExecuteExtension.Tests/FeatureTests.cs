@@ -68,7 +68,7 @@ namespace VkNet.ExecuteExtension.Tests
                     Assert.Pass();
                 }
 
-                Assert.AreNotEqual(task.IsFaulted,true);
+                Assert.AreNotEqual(task.IsFaulted, true);
 
                 await Task.Delay(10);
             }

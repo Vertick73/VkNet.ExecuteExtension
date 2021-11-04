@@ -9,9 +9,9 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VkNet.ExecuteExtension.Test
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "examples", "examples", "{FC2B58AF-40AD-496F-95FD-FCE6B3A86F12}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ExampleApp", "ExampleApp\ExampleApp.csproj", "{5D48E7C8-7FA9-45FA-A210-B45544BB2AD1}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ExampleApp", "examples\ExampleApp\ExampleApp.csproj", "{5D48E7C8-7FA9-45FA-A210-B45544BB2AD1}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RequestRateTest", "RequestRateTest\RequestRateTest.csproj", "{E6AD818B-8059-4D87-9047-B9E611CC738D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RequestRateTest", "examples\RequestRateTest\RequestRateTest.csproj", "{E6AD818B-8059-4D87-9047-B9E611CC738D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
